@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Magellan Research Challenge</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .hidden { display: none !important; }
+    body::before, body::after { content: none !important; display: none !important; pointer-events: none !important; }
+
+    #message, #liveMessage { margin-top: 10px; font-weight: bold; }
+    button {
+      margin-top: 10px; padding: 8px 16px; font-size: 16px;
+      background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer;
+    }
+    button:hover { background-color: #0056b3; }
+
+    #timerContainer { width: 100%; background-color: #ddd; height: 20px; margin-top: 10px; }
+    #timerBar { height: 20px; background-color: #4caf50; width: 100%; transition: width 1s linear; }
+
+    #languageToggle { position: fixed; top: 20px; right: 20px; z-index: 20; }
+    #terminateBtn   { position: fixed; bottom: 20px; left: 20px; z-index: 15; }
+
+    .stack { display: grid; gap: 8px; max-width: 720px; }
+    .row { display: grid; gap: 8px; grid-template-columns: 1fr auto; align-items: center; }
+    input[type="text"] { padding: 8px 10px; font-size: 16px; }
+    #submitToast { margin-top: 10px; font-weight: bold; color: #16a34a; }
+  </style>
+</head>
+<body>
+  <button id="languageToggle" type="button">UKR</button>
+
+  <!-- GATE -->
+  <div id="challenge" class="stack">
+    <h1 data-en="Magellan Research Challenge" data-uk="Дослідницький виклик Магеллана">Magellan Research Challenge</h1>
+
+    <label for="callsignInput" data-en="Your call sign (required)" data-uk="Ваш позивний (обов’язково)">Your call sign (required)</label>
+    <input type="text" id="callsignInput"
+      data-en-placeholder="Enter your call sign" data-uk-placeholder="Введіть ваш позивний"
+      placeholder="Enter your call sign">
+
+    <p id="question"
+      data-en="Warm-up: How many letters are there in the Ukrainian alphabet?"
+      data-uk="Розминка: Скільки літер в українському алфавіті?">
+      Warm-up: How many letters are there in the Ukrainian alphabet?
+    </p>
+
+    <div class="row">
+      <input type="text" id="answerInput"
+        data-en-placeholder="Your answer here" data-uk-placeholder="Ваша відповідь тут"
+        placeholder="Your answer here">
+      <button id="startSubmitBtn" type="button" data-en="SUBMIT" data-uk="ВІДПРАВИТИ">SUBMIT</button>
+    </div>
+    <div id="message"></div>
+    <button id="continueBtn" type="button" class="hidden" data-en="CLICK TO CONTINUE" data-uk="НАТИСНІТЬ, ЩОБ ПРОДОВЖИТИ">CLICK TO CONTINUE</button>
+  </div>
+
+  <!-- Instructions -->
+  <div id="instructions" class="hidden stack">
+    <h2 data-en="Instructions" data-uk="Інструкції">Instructions</h2>
+    <p id="instructionsText"
+       data-en="You will be presented with 22 questions. Use a variety of OSINT tools and techniques to find the answers. If you choose to copy and paste your answer, make sure to use CTRL+V to paste it, or you can type it in. Good luck!"
+       data-uk="Вам буде запропоновано 22 запитання. Використовуйте різноманітні інструменти та методи OSINT для пошуку відповідей. Якщо ви копіюєте відповідь, вставте її за допомогою CTRL+V або введіть вручну. Успіхів!">
+      You will be presented with 22 questions. Use a variety of OSINT tools and techniques to find the answers. If you choose to copy and paste your answer, make sure to use CTRL+V to paste it, or you can type it in. Good luck!
+    </p>
+    <button id="letsGoBtn" type="button" data-en="Let's go" data-uk="Поїхали">Let's go</button>
+  </div>
+
+  <!-- Quiz -->
+  <div id="quiz" class="hidden stack">
+    <h1 data-en="Magellan Challenge" data-uk="Виклик Магеллана">Magellan Challenge</h1>
+    <p id="liveInstruction" data-en="Press 'ENTER' to confirm your answer." data-uk="Натисніть 'ENTER', щоб підтвердити відповідь.">Press 'ENTER' to confirm your answer.</p>
+    <p id="liveQuestion"></p>
+    <div class="row">
+      <input type="text" id="liveAnswer" data-en-placeholder="Your answer here" data-uk-placeholder="Ваша відповідь тут" placeholder="Your answer here">
+      <button id="submitBtn" type="button" data-en="SUBMIT" data-uk="ВІДПРАВИТИ">SUBMIT</button>
+    </div>
+    <button id="skipBtn" type="button" data-en="SKIP" data-uk="ПРОПУСТИТИ">SKIP</button>
+    <div id="liveMessage"></div>
+    <div id="timerContainer"><div id="timerBar"></div></div>
+    <p id="scoreDisplay"></p>
+
+    <!-- Shown at the end (finish or terminate). We inject it or show it dynamically -->
+    <div id="resultsActions" class="hidden">
+      <button id="submitResultsBtn" type="button">Submit my results</button>
+      <div id="submitToast" class="hidden"></div>
+    </div>
+
+    <button id="restartBtn" type="button" class="hidden" data-en="Restart Challenge" data-uk="Почати заново">Restart Challenge</button>
+  </div>
+
+  <!-- Terminate -->
+  <button id="terminateBtn" type="button" class="hidden" data-en="Terminate the challenge" data-uk="Завершити виклик">Terminate the challenge</button>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    // (Optional) block devtools
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', e => {
+      const k = (e.key || '').toLowerCase();
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i','j','c'].includes(k))) e.preventDefault();
+    });
+
+    const WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwlMZYMqDehHG8t-rqxOd2DLd9kkyH-2mGihdE4BBHzCBqKkETN1u7Y4nIekS2oYnd8tw/exec';
+
+    let totalScore = 0;
+    let lang = 'en';
+    let queue = [];
+    let currentQ = null;
+    let currentAnswer = '';
+    let usedQuestions = [];
+    let callSign = '';
+    let isTransitioning = false;
+    let timerInterval;
+
+    // cache nodes
+    const liveQuestion    = document.getElementById('liveQuestion');
+    const liveAnswer      = document.getElementById('liveAnswer');
+    const liveMessage     = document.getElementById('liveMessage');
+    const scoreDisplay    = document.getElementById('scoreDisplay');
+    const continueBtn     = document.getElementById('continueBtn');
+    const instructionsDiv = document.getElementById('instructions');
+    const challengeDiv    = document.getElementById('challenge');
+    const letsGoBtn       = document.getElementById('letsGoBtn');
+    const quizDiv         = document.getElementById('quiz');
+    const submitBtn       = document.getElementById('submitBtn');
+    const skipBtn         = document.getElementById('skipBtn');
+    const restartBtn      = document.getElementById('restartBtn');
+    const terminateBtn    = document.getElementById('terminateBtn');
+    const callsignInput   = document.getElementById('callsignInput');
+    const languageToggle  = document.getElementById('languageToggle');
+
+    const resultsActions  = document.getElementById('resultsActions');
+    const submitResultsBtn= document.getElementById('submitResultsBtn');
+    const submitToast     = document.getElementById('submitToast');
+
+    // empty for now (paste later)
+    const questions = [
+      { en:"Refer to government databases (laws, reports, statistics) What number is stamped at the bottom left of the first page of a hyperlinked document in the section regarding wildcat dumping in Cochise County, AZ, code compliance?",
+        uk:"Зверніться до державних баз даних (закони, звіти, статистика). Який номер стоїть у нижньому лівому куті першої сторінки гіперпосилання у розділі про незаконні сміттєзвалища в окрузі Кочіс, штат Арізона (дотримання норм)?",
+        answer:"030309993"},
+      { en:"Try using Google tools. What is the first name of the author of an excert published online on May 25, 2001, about an explosion in 1908? Also, append the number of pages of the online article to your answer (for example, name Igor and 12 pages make Igor12.",
+        uk:"Спробуйте інструменти Google. Яке ім'я автора уривка, опублікованого онлайн 25 травня 2001 року про вибух 1908 року? Додайте кількість сторінок цієї статті до імені (наприклад: Igor + 12 = Igor12).",
+        answer:"Wolfgang9"},
+      { en:"Search some academic papers (Google Scholar, ResearchGate). What is the country where the photograph was taken? Photograph #6 p.34. The Dragonflies of Europe by R.R. Askew (revised edition 2004).",
+        uk:"Знайдіть академічну статтю (Google Scholar, ResearchGate). У якій країні було зроблено фотографію №6 на стор. 34 у книзі \"The Dragonflies of Europe\" Р.Р. Аскʼю (видання 2004)?",
+        answer:"Switzerland"},
+      { en:"Look in corporate records, official business registries, SEC filings. What is the first word of the previous legal name (starts with a “W”) of “Corporation X” in NC, USA? Prepend SOSID to your answer.",
+        uk:"Знайдіть у корпоративних реєстрах, офіційних бізнес-реєстрах, звітах SEC. Яке перше слово попередньої юридичної назви (починається з 'W') компанії “Corporation X” у Північній Кароліні, США? Додайте SOSID на початку.",
+        answer:"1899761Westinghouse"},
+      { en:"Leverage Geocode.xyz. Generate coordinates for Skole. Copy and paste them into the search bar of Google maps. Find the closest restaurant to the pin. The name is related to sheep. View the pictures. Look at the third bookshelf from the bottom. The fourth book on the right (it is navy blue). The answer is the country of origin of the author.",
+        uk:"Скористайтеся Geocode.xyz. Згенеруйте координати для Сколе. Скопіюйте та вставте їх у пошук Google Maps. Знайдіть найближчий ресторан — назва пов'язана з вівцями. Подивіться на фотографії. Третя полиця знизу, четверта книга праворуч (темно-синя). Вкажіть країну походження автора книги.",
+        answer:"Argentina"},
+      { en:"Geospatial data (Goolgle Earth Pro, Google Maps, Mapillary). What word is written inside of the toilet of a hotel located 23.77 mi (38.26 km) SW away from 45R VL 92652 95877?",
+        uk:"Геопросторові дані (Google Earth Pro, Google Maps, Mapillary). Яке слово написано всередині туалету готелю, що розташований за 38.26 км на південний захід від 45R VL 92652 95877?",
+        answer:"Taj"},
+      { en:"Geospatial data again (Google Lens, Chat GPT, Google Maps, Google Earth Pro Mapillary). Use the provided image to find your answer written on the red structure. To see the structure, you should be standing 241.18 ft (73.51 m) south of the image.",
+        uk:"Знову геопросторові дані (Google Lens, Chat GPT, Google Maps, Google Earth Pro, Mapillary). Використайте надане зображення, щоб побачити напис на червоній конструкції. Щоб побачити її, станьте на 73.51 м південніше зображення.",
+        answer:"TELEPHONE"},
+      { en:"Now it is time for some Google “Dorking” and Boolean logic. Your answer is the last word of passage 18 on page 11. Find a pdf file that contains words: art, war, sun in its title on a Canadian website that contains any letter in front of the word “.ualberta” in its URL.",
+        uk:"Спробуйте Google “Dorking” та булеву логіку. Знайдіть PDF-файл з назвою, що містить слова: art, war, sun на канадському сайті, в URL якого є будь-яка літера перед словом '.ualberta'. Ваша відповідь — останнє слово в уривку 18 на сторінці 11.",
+        answer:"battle"},
+      { en:"Explore Google trends. Search for the word Ukraine in the US in the District of Columbia in the last 12 months in the News in the category of Web Search. Your answer is the value of interest over time for the word Ukraine in the period of July 13-19.",
+        uk:"Дослідіть Google Trends. Знайдіть слово Ukraine у США в окрузі Колумбія за останні 12 місяців у розділі Новини у категорії Web Search. Ваша відповідь — це значення інтересу з часом для слова Ukraine у період з 13 по 19 липня.",
+        answer:"49"},
+      { en:"Let’s check websites for malicious code (“https://virustotal.com”). Your answer is the type of cyberthreat that the website “https://www.fantasticfilms.ru” present according to BitDefender.",
+        uk:"Перевіримо сайти на наявність шкідливого коду (https://virustotal.com). Ваша відповідь — тип кіберзагрози, яку виявив BitDefender на сайті “https://www.fantasticfilms.ru”.",
+        answer:"Phishing"},
+      { en:"Let’s check websites for malicious code (“https://virustotal.com”). Your answer is the cyberthreat label for the website “https://www.gncr.org” according to Webroot",
+        uk:"Перевіримо сайти на наявність шкідливого коду (“https://virustotal.com”). Ваша відповідь — мітка загрози згідно з Webroot для веб-сторінки “https://www.gncr.org",
+        answer:"Malicious"},
+      { en:"Let’s check websites for malicious code (“https://virustotal.com”). Your answer is the cyberthreat label for the website “https://www.purplehoodie.com” according to Fortinet.",
+        uk:"Перевіримо сайти на наявність шкідливого коду (“https://virustotal.com”). Ваша відповідь — мітка загрози для веб-сторінки “https://www.purplehoodie.com” згідно з Fortinet.",
+        answer:"Malware"},
+      { en:"Let’s venture into dnsdumpster.com. When inspecting “bbc.com”, look for the ASN name of the subdomain IP 198.51.44.73",
+        uk:"Перейдіть на dnsdumpster.com. Перевірте “bbc.com” і знайдіть ASN-ім’я піддомену з IP-адресою 198.51.44.73",
+        answer:"NSONE"},
+      { en:"Let’s venture into dnsdumpster. What is the ASN value for the URL of IP 108.162.193.239 in the NS records for the domain “xosodaiphat.com”?",
+        uk:"Перейдіть на dnsdumpster. Яке значення ASN для URL з IP 108.162.193.239 у записах NS для домену “xosodaiphat.com”?",
+        answer:"13335"},
+      { en:"Let’s venture into dnsdumpster. What is the verification token for “jamf.com” found when inspecting “trustpilot.com”?",
+        uk:"Перейдіть на dnsdumpster. Який токен підтвердження для “jamf.com” знайдено при аналізі “trustpilot.com”?",
+        answer:"hCZILKggaY23aId4VBfmVA"},
+      { en:"Let’s venture into dnsdumpster. While inspecting “ox.ac.uk”, specifically TXT records, what is the domain verification token for OpenAI? Don’t include “dv-“. Append it to the last word after the URL to a website under the image.",
+        uk:"Перейдіть на dnsdumpster. Перевіряючи TXT-записи домену “ox.ac.uk”, знайдіть токен перевірки для OpenAI (без “dv-”) і додайте його до останнього слова після URL під зображенням.",
+        answer:"projectFrXjlS30zrnR8T3D1ktwxud7"},
+      { en:"Go to “Urlscan.io”. What month was the TLS certificate for “wadefamilytree.org” issue?",
+        uk:"Зайдіть на сайт “Urlscan.io”. В якому місяці було видано TLS-сертифікат для “wadefamilytree.org”?",
+        answer:"August"},
+      { en:"Keep exploring “Urlscan.io”. What is the name of the city where the main IP for “tacticalshooters.net.restorationcheck.com” is located?",
+        uk:"Продовжіть дослідження на “Urlscan.io”. У якому місті знаходиться основна IP-адреса для сайту “tacticalshooters.net.restorationcheck.com”?",
+        answer:"Chisinau"},
+      { en:"On X.com geo search. The information you need was posted within 5-mile radius of Snorralaug Reykholt, Iceland on April 3, 2022. What brand is the rowing machine in the video with the dance?",
+        uk:"Геопошук на X.com. Інформацію опубліковано в радіусі 5 миль від Snorralaug Reykholt, Ісландія, 3 квітня 2022 року. Який бренд веслового тренажера показано у відео з танцем?",
+        answer:"StairMaster"},
+      { en:"Interpol is looking for a Ukrainian female. Her first name is Olga. She is between 40 and 50 years old. What is she charged with?",
+        uk:"Інтерпол розшукує громадянку України. Її ім’я — Ольга. Їй від 40 до 50 років. У чому її звинувачують?",
+        answer:"MURDER"},
+      { en:"Interpol is looking for a Serbian male with the last name Bjelotomic. He is between 25 and 35 years old. What is he charged with?",
+        uk:"Інтерпол розшукує громадянина Сербії за прізвищем Бєлотомич. Йому від 25 до 35 років. У чому його звинувачують?",
+        answer:"ROBBERY"},
+      { en:"On the FBI Ten Most Wanted Fugitives list, there is a person who was born in 1998. What state was this person born in?",
+        uk:"У списку ФБР «Десять найбільш розшукуваних утікачів» є особа, яка народилася у 1998 році. В якому штаті народилася ця особа?",
+        answer:"Arizona"}
+    ];
+    const totalQuestions = () => questions.length;
+
+    function shuffle(array) {
+      let a = array.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    const submitBtnLabel = () => (lang === 'en' ? 'Submit my results' : 'Надіслати мої результати');
+    const submittedLabel = () => (lang === 'en' ? 'Submitted!' : 'Надіслано!');
+
+    function updateLanguage() {
+      document.querySelectorAll('[data-en]').forEach(el => {
+        const val = el.getAttribute(`data-${lang}`);
+        if (val != null) el.textContent = val;
+      });
+      document.querySelectorAll('[data-en-placeholder]').forEach(el => {
+        const ph = el.getAttribute(`data-${lang}-placeholder`);
+        if (ph != null) el.setAttribute('placeholder', ph);
+      });
+      if (currentQ) liveQuestion.textContent = currentQ[lang];
+      const itEl = document.getElementById('instructionsText');
+      const it = itEl.getAttribute(`data-${lang}`);
+      if (it) itEl.textContent = it;
+      languageToggle.textContent = (lang === 'en') ? 'UKR' : 'ENG';
+      document.documentElement.lang = lang;
+
+      // update dynamic button label if present
+      if (submitResultsBtn) submitResultsBtn.textContent = submitBtnLabel();
+    }
+
+    languageToggle.addEventListener('click', () => {
+      lang = (lang === 'en') ? 'uk' : 'en';
+      updateLanguage();
+    });
+
+    // Gate
+    document.getElementById('startSubmitBtn').addEventListener('click', () => {
+      const answer   = (document.getElementById('answerInput').value || '').trim();
+      callSign      = (callsignInput.value || '').trim();
+      const message = document.getElementById('message');
+
+      if (!callSign) {
+        message.textContent = (lang === 'en') ? 'Please enter your call sign.' : 'Будь ласка, введіть ваш позивний.';
+        return;
+      }
+      if (answer === '33') {
+        message.textContent = (lang === 'en') ? "Correct. Let's continue." : 'Правильно. Переходимо далі.';
+        continueBtn.classList.remove('hidden');
+      } else {
+        message.textContent = (lang === 'en') ? 'Try again.' : 'Спробуйте ще раз.';
+      }
+    });
+
+    continueBtn.addEventListener('click', () => {
+      challengeDiv.classList.add('hidden');
+      instructionsDiv.classList.remove('hidden');
+    });
+
+    letsGoBtn.addEventListener('click', () => {
+      callSign = (callsignInput.value || '').trim();
+      if (!callSign) {
+        const m = document.getElementById('message');
+        m.textContent = (lang === 'en') ? 'Please enter your call sign before starting.' : 'Будь ласка, введіть ваш позивний перед початком.';
+        challengeDiv.classList.remove('hidden');
+        instructionsDiv.classList.add('hidden');
+        return;
+      }
+      instructionsDiv.classList.add('hidden');
+      quizDiv.classList.remove('hidden');
+      terminateBtn.classList.remove('hidden');
+
+      totalScore = 0;
+      usedQuestions = [];
+      queue = shuffle(questions);
+      renderNextFromQueue();
+    });
+
+    function renderNextFromQueue() {
+      if (queue.length === 0) { showResults(); return; }
+      isTransitioning  = false;
+      currentQ         = queue[0];
+      currentAnswer    = currentQ.answer || '';
+      liveQuestion.textContent = currentQ[lang] || '';
+      liveAnswer.value = '';
+      liveMessage.textContent = '';
+      liveAnswer.focus();
+    }
+
+    function checkAnswer() {
+      if (!currentAnswer) return;
+      const userAnswer = (liveAnswer.value || '').trim();
+      if (userAnswer.toLowerCase() === currentAnswer.toLowerCase()) {
+        liveMessage.textContent = (lang === 'en') ? 'Correct!' : 'Правильно!';
+        totalScore++;
+        usedQuestions.push(currentQ);
+        queue.shift();
+        isTransitioning = true;
+        setTimeout(renderNextFromQueue, 600);
+      } else {
+        liveMessage.textContent = (lang === 'en') ? 'Incorrect. Try again.' : 'Неправильно. Спробуйте ще раз.';
+      }
+    }
+
+    function skipQuestion() {
+      if (isTransitioning || queue.length === 0) return;
+      const first = queue.shift();
+      queue.push(first);
+      liveMessage.textContent = (lang === 'en') ? 'Skipped. You will see it again.' : 'Пропущено. Ви побачите це знову.';
+      isTransitioning = true;
+      setTimeout(renderNextFromQueue, 600);
+    }
+
+    function showResults() {
+      const N = totalQuestions();
+      if (N === 0) {
+        liveQuestion.textContent =
+          (lang === 'en')
+            ? 'No questions loaded yet. Paste your set and restart.'
+            : 'Питання ще не завантажені. Вставте свій набір і перезапустіть.';
+      } else {
+        liveQuestion.textContent =
+          (lang === 'en')
+            ? 'Challenge Complete! Well done!'
+            : 'Виклик завершено! Чудова робота!';
+      }
+
+      // Hide inputs
+      liveAnswer.classList.add('hidden');
+      submitBtn.classList.add('hidden');
+      skipBtn.classList.add('hidden');
+
+      // Score + actions
+      scoreDisplay.textContent = `${(lang === 'en') ? 'Score' : 'Результат'}: ${totalScore}/${N}`;
+      restartBtn.classList.remove('hidden');
+
+      // Show submit results button
+      submitResultsBtn.textContent = submitBtnLabel();
+      resultsActions.classList.remove('hidden');
+      submitToast.classList.add('hidden');
+      submitResultsBtn.disabled = false;
+
+      // Auto-post (kept). Remove if you want manual-only.
+      postToSheets({ terminated:false, source:'auto' });
+    }
+
+    submitBtn.addEventListener('click', checkAnswer);
+    skipBtn.addEventListener('click',  skipQuestion);
+    liveAnswer.addEventListener('keydown', e => { if (e.key === 'Enter') checkAnswer(); });
+
+    restartBtn.addEventListener('click', () => {
+      totalScore = 0;
+      usedQuestions = [];
+      queue = shuffle(questions);
+      // reset UI
+      resultsActions.classList.add('hidden');
+      submitToast.classList.add('hidden');
+      quizDiv.classList.remove('hidden');
+      restartBtn.classList.add('hidden');
+      liveAnswer.classList.remove('hidden');
+      submitBtn.classList.remove('hidden');
+      skipBtn.classList.remove('hidden');
+      scoreDisplay.textContent = '';
+      updateLanguage();
+      renderNextFromQueue();
+    });
+
+    // Manual submit button (on completion screen)
+    submitResultsBtn.addEventListener('click', () => {
+      submitResults(false, submitResultsBtn);
+    });
+
+    function submitResults(isTerminated, btnEl) {
+      postToSheets({ terminated: !!isTerminated, source:'manual' });
+      if (btnEl) {
+        btnEl.disabled = true;
+      }
+      submitToast.textContent = submittedLabel();
+      submitToast.classList.remove('hidden');
+    }
+
+    terminateBtn.addEventListener('click', terminateChallenge);
+
+    function terminateChallenge() {
+      if (typeof timerInterval !== 'undefined') clearInterval(timerInterval);
+
+      const N = totalQuestions();
+      const enMsg = 'You earned ' + totalScore + ' point' + (totalScore === 1 ? '' : 's') + ' out of ' + N + '.';
+      const ukMsg = 'Ви отримали ' + totalScore + ' бал' + (totalScore === 1 ? '' : 'ів') + ' з ' + N + '.';
+
+      // Auto-post on terminate (kept). Remove if you want manual-only.
+      postToSheets({ terminated:true, source:'auto' });
+
+      // Replace screen, include a dedicated Submit button for manual send
+      quizDiv.innerHTML = `
+        <section style="
+          background-color: rgba(15, 23, 42, 0.85);
+          padding: 2rem;
+          border-radius: 12px;
+          max-width: 800px;
+          margin: 2rem auto;
+          text-align: center;
+          color: #f8fafc;
+        ">
+          <h1>${(lang === 'en') ? 'Challenge Terminated' : 'Виклик завершено'}</h1>
+          <p>${(lang === 'en') ? enMsg : ukMsg}</p>
+          <div style="margin: 12px 0;">
+            <button id="manualSubmitAfterTerminate" type="button">${submitBtnLabel()}</button>
+            <div id="terminateToast" class="hidden" style="margin-top:8px;font-weight:bold;color:#16a34a;">${submittedLabel()}</div>
+          </div>
+          <blockquote style="font-style: italic; margin: 20px 20px; color: #facc15;">
+            "${(lang === 'en')
+              ? 'If you quit on the process, you are quitting on the result.'
+              : 'Якщо ви здаєтесь під час процесу — ви відмовляєтесь від результату.'}"
+            — Idowu Koyenikan
+          </blockquote>
+          <button type="button" onclick="location.reload()">
+            ${(lang === 'en') ? 'Go to Start' : 'Повернутися на початок'}
+          </button>
+        </section>
+      `;
+
+      // Wire the new button
+      const manualBtn = document.getElementById('manualSubmitAfterTerminate');
+      const terminateToast = document.getElementById('terminateToast');
+      manualBtn.addEventListener('click', () => {
+        postToSheets({ terminated:true, source:'manual' });
+        manualBtn.disabled = true;
+        terminateToast.classList.remove('hidden');
+      });
+    }
+
+    // --- telemetry + webhook ---
+    function detectOS(ua) {
+      ua = (ua || '').toLowerCase();
+      if (ua.includes('windows')) return 'Windows';
+      if (ua.includes('mac os') || ua.includes('macintosh')) return 'macOS';
+      if (ua.includes('android')) return 'Android';
+      if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ios')) return 'iOS';
+      if (ua.includes('linux')) return 'Linux';
+      return 'Unknown';
+    }
+    function detectDevice() {
+      const nav = navigator;
+      const isMobile = (nav.userAgentData && nav.userAgentData.mobile) || /Mobi|Android/i.test(nav.userAgent);
+      const isTablet = /Tablet|iPad/i.test(nav.userAgent);
+      if (isTablet) return 'Tablet';
+      if (isMobile) return 'Mobile';
+      return 'Desktop';
+    }
+    function getPayload(base) {
+      const ua = navigator.userAgent || '';
+      const os = detectOS(ua);
+      const device = detectDevice();
+      const screenSize = (window.screen && window.screen.width && window.screen.height)
+        ? `${window.screen.width}x${window.screen.height}` : 'Unknown';
+      const browserLang = navigator.language || navigator.userLanguage || 'Unknown';
+      return {
+        time: new Date().toISOString(),
+        call_sign: callSign || '',
+        score: totalScore,
+        os, user_agent: ua, device, screen_size: screenSize,
+        language_ui: lang, language_browser: browserLang,
+        ...base
+      };
+    }
+    function postToSheets({ terminated, source }) {
+      const payloadObj = getPayload({ terminated: !!terminated, submit_source: source || 'auto' });
+      const payload = JSON.stringify(payloadObj);
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: 'text/plain;charset=utf-8' });
+          if (navigator.sendBeacon(WEBHOOK_URL, blob)) return;
+        }
+        fetch(WEBHOOK_URL, {
+          method: 'POST', mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: payload, keepalive: true
+        }).catch(() => {});
+      } catch (_) {}
+    }
+
+    // init
+    updateLanguage();
+  });
+  </script>
+</body>
+</html>
